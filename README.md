@@ -10,7 +10,7 @@
 
 
 
-The unlabeled data used in our experminents can be downloaded from this [link](https://drive.google.com/file/d/1NYm5CVXK7vqn-Nf8rnin-4iAxWeJcKVv/view?usp=sharing). 
+The unlabeled data used in our experminents can be downloaded from this [link]([https://drive.google.com/file/d/1NYm5CVXK7vqn-Nf8rnin-4iAxWeJcKVv/view?usp=sharing](https://drive.google.com/file/d/1qJImRVG-q8hjrSIk7VkcOIv-83Yhm3_v/view?usp=sharing)). 
 
 
 # Prerequisites:
@@ -19,25 +19,26 @@ Required packages are listed in the requirements.txt file:
 ```
 pip install -r requirements.txt
 ```
-# Training
-*  First update the workspace path
+Please update the workspace path
+
+# To train the model
 *  Run cd scripts/:
   ```
   sh train_ours.sh
   ```
   
-*  Run the following code to train ADI:
+*  Or directly use:
 ```
-CUDA_VISIBLE_DEVICES=0 python train.py --dataset Nadi --train_sample 0.1
+CUDA_VISIBLE_DEVICES=0 python train.py --dataset Nadi --train_sample 0.1 --pretrained_bert_name /workspace/plm/arbert
 ```
 
-- The params could be :
+- The params :
     - --dataset =\{Nadi\}
-    - --train_sample ={0.1, 0.2,...,1.0},
+    - --train_sample  # the percentage of labeled training samples
+    - --pretrained_bert_name # the path of the pretrained language model
 
+The models are saved to models
 The results are written to outputs
-
-
 
 If you use the code,  please cite the paper: 
  ```
