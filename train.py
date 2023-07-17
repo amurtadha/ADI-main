@@ -221,9 +221,6 @@ class Instructor:
             train_rev /= len(train_data_loader.dataset)
             train_acc/=t_total_c
 
-            # noise = (np.array(trainset.imgs)[:, 1].astype(int) != np.array(clean_labels)).sum()
-            # (np.array([d['label'] for d in train_data_loader.dataset]) != np.array(clean_labels))
-
             logger.info(
                 '[%6d/%6d] loss: %5f,train_rev: %5f, acc: %5f, lr: %7f'
                 % (epoch, self.opt.num_epoch, train_loss, train_rev, train_acc, self.opt.learning_rate, ))
@@ -399,7 +396,7 @@ def main():
     dataset_files = {
         'train': '{}/datasets/{}/train.json'.format(opt.workspace, opt.dataset),
         'unlabel': '{}/datasets/large_corpus/unlabeled_corpus.txt'.format(opt.workspace,opt.dataset),
-        'test': '{}/datasets/{}/test.json'.format(opt.workspace,opt.dataset),
+        'test': '{}/datasets/{}/dev.json'.format(opt.workspace,opt.dataset),
         'dev': '{}/datasets/{}/dev.json'.format(opt.workspace,opt.dataset),
     }
 
