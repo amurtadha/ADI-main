@@ -1,32 +1,19 @@
 
-# import numpy as np
-# import torch
-import torch.nn as nn
-# from transformers import  RobertaModel, RobertaConfig
-from transformers import  AutoModel, AutoConfig
-# from transformers.models.roberta.modeling_roberta import  shift
-# from transformers.models.bart.modeling_bart import  shift_tokens_right
 
-# import torch.nn.functional as F
+import torch.nn as nn
+from transformers import  AutoModel, AutoConfig
+
 
 from torch.autograd import Function
 def mask_logits(target, mask):
     return target * mask + (1 - mask) * (-1e30)
 
 class ADI_Classifier(nn.Module):
-    '''
-    Bert for sequence classification.
-    '''
-
     def __init__(self, args, hidden_size=256):
         super(ADI_Classifier, self).__init__()
         config = AutoConfig.from_pretrained(args.pretrained_bert_name)
         self.encoder = AutoModel.from_pretrained(args.pretrained_bert_name, config=config)
         self.encoder.to('cuda')
-
-        #layers = [nn.Linear(config.hidden_size, hidden_size), nn.ReLU(), nn.Dropout(.3),
-
-        #          nn.Linear(hidden_size, args.lebel_dim)]
 
         layers = [nn.Linear(config.hidden_size, args.lebel_dim)]
         layers_rev = [nn.Linear(config.hidden_size, 2)]
