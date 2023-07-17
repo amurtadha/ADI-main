@@ -22,11 +22,10 @@ pip install -r requirements.txt
 # Training
 *  First update the workspace path
 *  Run cd scripts/:
-     ```
-     sh train_ours.sh
-     ```
-CUDA_VISIBLE_DEVICES=0 python train.py --dataset Nadi --train_sample 0.1
-```     
+  ```
+  sh train_ours.sh
+  ```
+  
 *  Run the following code to train ADI:
 ```
 CUDA_VISIBLE_DEVICES=0 python train.py --dataset Nadi --train_sample 0.1
