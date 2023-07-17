@@ -217,8 +217,6 @@ class Instructor:
             train_rev /= len(train_data_loader.dataset)
             train_acc/=t_total_c
 
-            # noise = (np.array(trainset.imgs)[:, 1].astype(int) != np.array(clean_labels)).sum()
-            # (np.array([d['label'] for d in train_data_loader.dataset]) != np.array(clean_labels))
 
             logger.info(
                 '[%6d/%6d] loss: %5f,train_rev: %5f, acc: %5f, lr: %7f'
@@ -245,7 +243,6 @@ class Instructor:
 
                 with torch.no_grad():
                     logger.info('testing')
-                    # test_loss, f1_sc, f1_micro, test_acc
 
                     test_loss, test_f1_sc, test_f1_micro, test_acc, test_precisions, test_recalls, \
                         test_f1s = self._evaluate(model, criterion_y,  test_data_loader, getreps=False)
@@ -263,26 +260,7 @@ class Instructor:
                         '\t test ...loss: %5f, acc: %5f,f1 macro: %5f , f1 micro: %5f best_acc: %5f best_f1: %5f best_f1 micro: %5f ' % (
                             test_loss, test_acc, test_f1_sc, test_f1_micro, best_acc_test, best_f1_test,
                             best_f1_micro_test))
-                    # if test_f1_sc == best_f1_test:
-                        # test_raw = open(self.opt.dataset_file['test']).read().splitlines()
-                        # test_raw = np.asarray([e.split('\t') for e in test_raw])
-                        # stats = list(zip(test_precisions, test_recalls, test_f1s))
-                        # with open('stats.csv', 'w') as f:
-                        #     f.write('Class,Precision,Recall,F1\n')
-                        #     for j, (prec, rec, f1) in enumerate(stats):
-                        #         f.write(f'{self.labels[j-1]},{prec},{rec},{f1}\n')
-
-                        # with open('misclassified.csv', 'w') as f:
-                        #     f.write('Text, Label, Predicition\n')
-                        #     for idx in misclass:
-                        #         line = test_raw[idx]
-                        #        # f.write(f"{line['text']}, {line['label']}, {self.labels[test_preds[idx]]}\n")
-                        #        # f.write(f"['text'], ['label'], {self.labels[test_preds[idx]]}\n")
-                        #         f.write(f"{line[0]}, {line[1]}, {self.labels[test_preds[idx]]}\n")
-                        # np.save("conf_matrix.npy", conf_matrix)
-                        #
-                        # np.save("aadi_reps.npy", reps)
-
+                   
                     writer = SummaryWriter('runs/AADI/Corpus_6_camelbert-mix_5')
                     writer.add_scalar('Testing Accuracy', best_f1_micro_test, global_step)
                     writer.add_scalar('Testing loss', test_loss, global_step)
@@ -365,9 +343,7 @@ class Instructor:
         with open(f'{outputs_path}/aadi_{self.opt.dataset}_misclassified.csv', 'w') as f:
             f.write('Text, Label, Predicition\n')
             for idx in misclass:
-                line = test_raw[idx]
-                # f.write(f"{line['text']}, {line['label']}, {self.labels[test_preds[idx]]}\n")
-                # f.write(f"['text'], ['label'], {self.labels[test_preds[idx]]}\n")
+                line = test_raw[idx]           
                 f.write(f"{line[0]}, {line[1]}, {self.labels[test_preds[idx]]}\n")
         np.save(f"{outputs_path}/aadi_{self.opt.dataset}_conf_matrix.npy", conf_matrix)
 
@@ -421,7 +397,7 @@ def main():
     dataset_files = {
         'train': '{}/datasets/{}/train.json'.format(opt.workspace, opt.dataset),
         'unlabel': '{}/datasets/large_corpus/unlabeled_corpus.txt'.format(opt.workspace,opt.dataset),
-        'test': '{}/datasets/{}/test.json'.format(opt.workspace,opt.dataset),
+        'test': '{}/datasets/{}/dev.json'.format(opt.workspace,opt.dataset),
         'dev': '{}/datasets/{}/dev.json'.format(opt.workspace,opt.dataset),
     }
 
