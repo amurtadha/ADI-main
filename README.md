@@ -1,14 +1,17 @@
  
  # Arabic Dialect Identification 
- A model  for learning under semi-supervised settings
- 
+
  This is the source code for the paper: Mohammed Abdelmajeed, Ahmed Murtadha et al. "Leveraging Unlabeled Corpus for Arabic Dialect Identification". 
+ 
+ We aim to leverage unlabeled data to enhance the performance of deep neural networks on Arabic Dialect Identification in adversarial settings.
+ 
 
 # Data
 
 
 
-The datasets used in our experminents can be downloaded from this [link](https://drive.google.com/file/d/1NYm5CVXK7vqn-Nf8rnin-4iAxWeJcKVv/view?usp=sharing). 
+The unlabeled data used in our experminents can be downloaded from this [link](https://drive.google.com/file/d/1NYm5CVXK7vqn-Nf8rnin-4iAxWeJcKVv/view?usp=sharing). 
+
 
 # Prerequisites:
 Required packages are listed in the requirements.txt file:
