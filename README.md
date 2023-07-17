@@ -10,7 +10,7 @@
 
 
 
-The unlabeled data used in our experminents can be downloaded from this [link]([https://drive.google.com/file/d/1qJImRVG-q8hjrSIk7VkcOIv-83Yhm3_v/view?usp=sharing])
+The unlabeled data used in our experminents can be downloaded from this [link](https://drive.google.com/file/d/1qJImRVG-q8hjrSIk7VkcOIv-83Yhm3_v/view?usp=sharing)
 
 # Prerequisites:
 Required packages are listed in the requirements.txt file:
