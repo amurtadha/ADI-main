@@ -179,9 +179,9 @@ class Instructor:
 
                 global_step += 1
                 optimizer.zero_grad()
-                labels = sample_batched['label']
-                evid = sample_batched['is_evidence']
-                evid=evid.to(self.opt.device)
+                labels = sample_batched['label'].to(self.opt.device)
+                evid = sample_batched['is_evidence'].to(self.opt.device)
+    
 
 
                 p = float(global_step + epoch * len_dataloader) /self.opt.num_epoch  / len_dataloader
@@ -189,7 +189,7 @@ class Instructor:
 
                 #
                 label_clean = labels[evid == 1]
-                label_clean = label_clean.to(self.opt.device)
+                label_clean = label_clean
 
 
                 inputs = [sample_batched[col].to(self.opt.device) for col in self.opt.inputs_cols]
