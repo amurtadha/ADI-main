@@ -6,7 +6,6 @@ import os
 from datetime import datetime
 
 import sys
-#from sentence_transformers import SentenceTransformer
 import random
 import numpy
 from sklearn import metrics
