@@ -12,16 +12,19 @@ from sklearn import metrics
 import torch
 import torch.nn as nn
 import numpy as np
-from torch.utils.data import DataLoader, ConcatDataset,random_split
+from torch.utils.data import DataLoader, ConcatDataset,random_split, Subset
 from data_utils import   Process_Corpus,Process_Corpus_ads
 
 from tqdm import tqdm
+from transformers import  AdamW
 
 import json
 from transformers import  AutoTokenizer
 from MyModel import ADI_Classifier
 import pickle as pk
 from torch.utils.tensorboard import SummaryWriter
+import copy
+from collections import defaultdict
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -29,33 +32,23 @@ logger.addHandler(logging.StreamHandler(sys.stdout))
 
 
 
+
 class Instructor:
     def __init__(self, opt):
         self.opt = opt
+        print('here')
         opt.plm = opt.pretrained_bert_name.split('/')[-1]
         cache = 'cache/AADI_{}_{}.pk'.format(opt.dataset, opt.plm)
         self.labels  = json.load(open('{}/datasets/{}/labels.json'.format(opt.workspace,opt.dataset)))
 
-        if os.path.exists(cache):
-            d = pk.load(open(cache, 'rb'))
-            self.trainset = d['train']
-            self.trainset_unlabel = d['unlabel']
-            self.testset = d['test']
-            self.valset = d['dev']
+        tokenizer = AutoTokenizer.from_pretrained(opt.pretrained_bert_name)
 
-        else:
-            tokenizer = AutoTokenizer.from_pretrained(opt.pretrained_bert_name)
-
-            self.opt.lebel_dim = len(self.labels)
-            self.trainset = Process_Corpus(opt.dataset_file['train'], tokenizer, opt.max_seq_len, self.labels )
-            self.trainset_unlabel = Process_Corpus_ads(opt.dataset_file['unlabel'], tokenizer, opt.max_seq_len,self.labels, train_len=len(self.trainset))
-            self.valset = Process_Corpus(opt.dataset_file['dev'], tokenizer, opt.max_seq_len, self.labels )
-            self.testset = Process_Corpus(opt.dataset_file['test'], tokenizer, opt.max_seq_len, self.labels )
-
-            if not os.path.exists('cache'):
-                os.mkdir('cache')
-            d = {'train': self.trainset,'unlabel': self.trainset_unlabel, 'test': self.testset, 'dev': self.valset}
-            pk.dump(d, open(cache, 'wb'))
+        self.opt.lebel_dim = len(self.labels)
+        self.trainset = Process_Corpus(opt.dataset_file['train'], tokenizer, opt.max_seq_len, self.labels)
+        self.trainset_unlabel = Process_Corpus_ads(opt.dataset_file['unlabel'], tokenizer, opt.max_seq_len, self.labels,
+                                                   train_len=len(self.trainset))
+        self.valset = Process_Corpus(opt.dataset_file['dev'], tokenizer, opt.max_seq_len, self.labels)
+        self.testset = Process_Corpus(opt.dataset_file['test'], tokenizer, opt.max_seq_len, self.labels)
 
         self.labels= list(self.labels.keys())
         logger.info('labeled train: {}, unlabeled train: {}, test: {}, dev: {}'.format(len( self.trainset), len( self.trainset_unlabel),len( self.testset), len( self.valset)))
@@ -152,7 +145,7 @@ class Instructor:
                 misclassifications, conf_matrix, all_reps
 
 
-    def _train(self,model,optimizer,criterion_y,criterion_d,train_data_loader, val_data_loader, test_data_loader, t_total):
+    def _train(self,model,optimizer,criterion_y,criterion_d,train_data_loader, val_data_loader, test_data_loader, t_total, lamd=0.8):
 
         best_acc_test=0
         global_step = 0
@@ -163,7 +156,6 @@ class Instructor:
 
         for epoch in range(self.opt.num_epoch):
             train_loss =train_rev= t_total_c = train_acc = 0.0
-
             model.train()
             if epoch != 0:
                 lr_this_step = self.opt.learning_rate * self.warmup_linear(global_step / t_total,
@@ -195,9 +187,10 @@ class Instructor:
                 _,logits,logits_rev = model(inputs, alpha)
 
                 loss_d = criterion_d(logits_rev, evid)
-                loss_y = criterion_d(logits[evid==1], label_clean)
+                loss_y = criterion_y(logits[evid==1], label_clean)
 
-                loss = loss_d+loss_y
+                # loss = loss_d+loss_y
+                loss = (1 - lamd) * loss_d + lamd * loss_y
 
                 with torch.no_grad():
 
@@ -235,41 +228,73 @@ class Instructor:
 
                 logger.info('\t valid ...loss: %5f, acc: %5f,f1: %5f,f1 micro: %5f, best_acc: %5f' % (
                     val_loss, val_acc, val_f1_sc,val_f1_micro,best_valid_acc))
-
-            is_best = val_acc >= best_valid_acc
-            if is_best:
-                model.eval()
-
-                with torch.no_grad():
-                    logger.info('testing')
-                    # test_loss, f1_sc, f1_micro, test_acc
-
-                    test_loss, test_f1_sc, test_f1_micro, test_acc, test_precisions, test_recalls, \
-                        test_f1s = self._evaluate(model, criterion_y,  test_data_loader, getreps=False)
-
-                    if test_f1_sc > best_f1_test:
-                        path = f"models/aadi_{self.opt.pretrained_bert_name.split('/')[-1]}_{self.opt.dataset}_{datetime.now().strftime('%Y-%m-%d')}"
-                        torch.save(model.state_dict(), path)
-
-                    best_acc_test = max(best_acc_test, test_acc)
-                    best_f1_test = max(best_f1_test, test_f1_sc)
-                    best_f1_micro_test = max(best_f1_micro_test, test_f1_micro)
+                if val_acc > best_f1_test:
+                    path = copy.deepcopy(model.state_dict())
+                best_f1_test = max(best_f1_test, val_acc)
 
 
-                    logger.info(
-                        '\t test ...loss: %5f, acc: %5f,f1 macro: %5f , f1 micro: %5f best_acc: %5f best_f1: %5f best_f1 micro: %5f ' % (
-                            test_loss, test_acc, test_f1_sc, test_f1_micro, best_acc_test, best_f1_test,
-                            best_f1_micro_test))
+            # is_best = val_acc >= best_valid_acc
+            # if is_best:
+            #     model.eval()
+            #
+            #     with torch.no_grad():
+            #         logger.info('testing')
+            #         # test_loss, f1_sc, f1_micro, test_acc
+            #
+            #         test_loss, test_f1_sc, test_f1_micro, test_acc, test_precisions, test_recalls, \
+            #             test_f1s = self._evaluate(model, criterion_y,  test_data_loader, getreps=False)
+            #
+            #         if test_f1_sc > best_f1_test:
+            #             # path = f"models/aadi_{self.opt.pretrained_bert_name.split('/')[-1]}_{self.opt.dataset}_{datetime.now().strftime('%Y-%m-%d')}"
+            #             path = copy.deepcopy(model.state_dict())
+            #
+            #         best_acc_test = max(best_acc_test, test_acc)
+            #         best_f1_test = max(best_f1_test, test_f1_sc)
+            #         best_f1_micro_test = max(best_f1_micro_test, test_f1_micro)
+            #
+            #
+            #         logger.info(
+            #             '\t test ...loss: %5f, acc: %5f,f1 macro: %5f , f1 micro: %5f best_acc: %5f best_f1: %5f best_f1 micro: %5f ' % (
+            #                 test_loss, test_acc, test_f1_sc, test_f1_micro, best_acc_test, best_f1_test,
+            #                 best_f1_micro_test))
+            #
+            #         writer = SummaryWriter('runs/AADI/Corpus_6_camelbert-mix_5')
+            #         writer.add_scalar('Testing Accuracy', best_f1_micro_test, global_step)
+            #         writer.add_scalar('Testing loss', test_loss, global_step)
+            #         writer.add_scalar('Validation Accuracy', best_valid_acc, global_step)
+            #         writer.add_scalar('Validation', val_loss, global_step)
 
-                    writer = SummaryWriter('runs/AADI/Corpus_6_camelbert-mix_5')
-                    writer.add_scalar('Testing Accuracy', best_f1_micro_test, global_step)
-                    writer.add_scalar('Testing loss', test_loss, global_step)
-                    writer.add_scalar('Validation Accuracy', best_valid_acc, global_step)
-                    writer.add_scalar('Validation', val_loss, global_step)
+        # with open('results_ads.txt', 'a+') as f :
+        #     f.write(f"{datetime.now().strftime('%Y-%m-%d %H:%M')} model {self.opt.pretrained_bert_name.split('/')[-1]} dataset {self.opt.dataset} train_sample {self.opt.train_sample} f1  {best_f1_test:.4} acc {best_acc_test:.4} \n")
+        # f.close()
 
-        with open('results_ads.txt', 'a+') as f :
-            f.write(f"{datetime.now().strftime('%Y-%m-%d %H:%M')} model {self.opt.pretrained_bert_name.split('/')[-1]} dataset {self.opt.dataset} train_sample {self.opt.train_sample} f1  {best_f1_test:.4} acc {best_acc_test:.4} \n")
-        f.close()
+        return path
+
+
+
+    def balanced_train_sample(sefl, trainset, train_sample_ratio, seed=None):
+        if seed is not None:
+            random.seed(seed)
+            torch.manual_seed(seed)
+
+        # Group samples by their labels
+        label_to_indices = defaultdict(list)
+        for idx, d in enumerate(trainset.data):
+
+            label_to_indices[d['label']].append(idx)
+
+        # Sample from each group
+        sampled_indices = []
+        for label, indices in label_to_indices.items():
+            sample_size = int(len(indices) * train_sample_ratio)
+            sampled_indices.extend(random.sample(indices, sample_size))
+
+        # Create a subset of the trainset with the sampled indices
+        trainset = Subset(trainset, sampled_indices)
+
+        return trainset
+
+
 
     def run(self):
 
@@ -280,22 +305,26 @@ class Instructor:
 
 
         if self.opt.train_sample >0:
-            ratio = int(len(trainset) * self.opt.train_sample)
-            _, trainset = random_split(trainset, (len(trainset) - ratio, ratio))
+            trainset=self.balanced_train_sample(trainset, self.opt.train_sample)
+
+            # ratio = int(len(trainset) * self.opt.train_sample)
+            # _, trainset = random_split(trainset, (len(trainset) - ratio, ratio))
+
+            ratio = int(len(trainset_unlabel) * self.opt.train_sample)
+            _, trainset_unlabel = random_split(trainset_unlabel, (len(trainset_unlabel) - ratio, ratio))
 
         for i in range(len(trainset)):
             trainset[i]['is_evidence'] =1
-            # trainset[i]['new_index'] =len(trainset)
-
-
 
         for i in range(len(trainset_unlabel)):
             trainset_unlabel[i]['is_evidence'] = 0
             trainset_unlabel[i]['new_index'] = i
         for i in range(len(trainset)):
             trainset[i]['new_index'] = len(trainset_unlabel)+i
+
+
         trainset= ConcatDataset([trainset, trainset_unlabel])
-        logger.info('train sample ratio {}, label {}, unlabel {}, test {}, dev {}'.format(self.opt.train_sample, len(trainset), len(trainset_unlabel), len(testset), len(valset)))
+        logger.info('train sample ratio {}, training {}, unlabel {}, test {}, dev {}'.format(self.opt.train_sample, len(trainset), len(trainset_unlabel), len(testset), len(valset)))
 
 
         train_data_loader = DataLoader(dataset=trainset, batch_size=self.opt.batch_size, shuffle=True)
@@ -307,18 +336,16 @@ class Instructor:
         model = ADI_Classifier(self.opt)
         #model = nn.DataParallel(model)
         model.to(self.opt.device)
-        _params = filter(lambda p: p.requires_grad, model.parameters())
-        optimizer = self.opt.optimizer(model.parameters(), lr=self.opt.learning_rate,
-                                            weight_decay=self.opt.l2reg)
+
+        optimizer =AdamW(model.parameters(), lr=self.opt.learning_rate, weight_decay=0.01)
 
 
         criterion_y = nn.CrossEntropyLoss()
         criterion_d = nn.CrossEntropyLoss()
 
-        self._train(model,optimizer,criterion_y, criterion_d,  train_data_loader, val_data_loader, test_data_loader, t_total)
+        best_model_path = self._train(model,optimizer,criterion_y, criterion_d,  train_data_loader, val_data_loader, test_data_loader, t_total)
+        model.load_state_dict(best_model_path)
 
-        path = f"models/aadi_{self.opt.pretrained_bert_name.split('/')[-1]}_{self.opt.dataset}_{datetime.now().strftime('%Y-%m-%d')}"
-        model.load_state_dict(torch.load(path))
         model.to(self.opt.device)
 
         test_loss, test_f1_sc, test_f1_micro, test_acc, test_precisions, test_recalls, test_f1s, test_preds, \
@@ -327,59 +354,33 @@ class Instructor:
         logger.info(
             '\t test ...loss: %5f, acc: %5f,f1 macro: %5f , f1 micro: %5f' % (
                 test_loss, test_acc, test_f1_sc, test_f1_micro))
-        test_raw = open(self.opt.dataset_file['test']).read().splitlines()
-        test_raw = np.asarray([e.split('\t') for e in test_raw])
-        stats = list(zip(test_precisions, test_recalls, test_f1s))
 
+        with open('results_ads.txt', 'a+') as f:
+            f.write(
+                f"{datetime.now().strftime('%Y-%m-%d %H:%M')} model {self.opt.pretrained_bert_name.split('/')[-1]} dataset {self.opt.dataset} train_sample {self.opt.train_sample} f1  {test_f1_sc:.4} acc {test_acc:.4} \n")
+        f.close()
 
-        with open(f'outputs/aadi_{self.opt.dataset}_stats.csv', 'w') as f:
-            f.write('Class,Precision,Recall,F1\n')
-            for j, (prec, rec, f1) in enumerate(stats):
-                f.write(f'{self.labels[j - 1]},{prec},{rec},{f1}\n')
-
-        with open(f'outputs/aadi_{self.opt.dataset}_misclassified.csv', 'w') as f:
-            f.write('Text, Label, Predicition\n')
-            for idx in misclass:
-                line = test_raw[idx]
-                # f.write(f"{line['text']}, {line['label']}, {self.labels[test_preds[idx]]}\n")
-                # f.write(f"['text'], ['label'], {self.labels[test_preds[idx]]}\n")
-                f.write(f"{line[0]}, {line[1]}, {self.labels[test_preds[idx]]}\n")
-        np.save(f"outputs/aadi_{self.opt.dataset}_conf_matrix.npy", conf_matrix)
-
-        np.save(f"outputs/aadi_{self.opt.dataset}_reps.npy", reps)
 
 
 def main():
     # Hyper Parameters
     parser = argparse.ArgumentParser()
     parser.add_argument('--dataset', default='Corpus-26', type=str, help=' Corpus-26, Corpus-6')
-    parser.add_argument('--workspace', default='/workspace/June/NLP_ADI', type=str, help=' workspace')
-    parser.add_argument('--optimizer', default='adam', type=str)
-    parser.add_argument('--initializer', default='xavier_uniform_', type=str)
-    parser.add_argument('--learning_rate', default=3e-5, type=float, help='try 5e-5, 3e-5 for BERT, 1e-3 for others')
-    parser.add_argument('--adam_epsilon', default=2e-8, type=float, help='')
-    parser.add_argument('--weight_decay', default=0, type=float, help='try 5e-5, 2e-5 for BERT, 1e-3 for others')
-    parser.add_argument('--dropout', default=0.5, type=float)
-    parser.add_argument('--l2reg', default=0.01, type=float)
-    parser.add_argument('--reg', type=float, default=0.00005, help='regularization constant for weight penalty')
-    parser.add_argument('--num_epoch', default=10, type=int, help='try larger number for non-BERT models')
-    parser.add_argument('--batch_size', default=32, type=int, help='try 16, 32, 64 for BERT models')
-    parser.add_argument('--batch_size_val', default=32, type=int, help='try 16, 32, 64 for BERT models')
-    parser.add_argument('--log_step', default=35500, type=int)
-    parser.add_argument('--embed_dim', default=300, type=int)
-    parser.add_argument('--hidden_dim', default=300, type=int)
-    parser.add_argument('--max_grad_norm', default=10, type=int)
+    parser.add_argument('--workspace', default='/workspace/ArNLP/', type=str, help=' workspace')
+    parser.add_argument('--learning_rate', default=3e-5, type=float,)
+    parser.add_argument('--num_epoch', default=6, type=int)
+    parser.add_argument('--batch_size', default=64, type=int)
+    parser.add_argument('--batch_size_val', default=64, type=int)
     parser.add_argument('--warmup_proportion', default=0.01, type=float)
-    parser.add_argument('--bert_dim', default=768, type=int)
-    parser.add_argument('--pretrained_bert_name', default='/workspace/plm/arbert',type=str)
+    parser.add_argument('--pretrained_bert_name', default='rahbi/alclam-base-v1',type=str)
     parser.add_argument('--max_seq_len', default=128, type=int)
     parser.add_argument('--lebel_dim', default=26, type=int)
     parser.add_argument('--train_sample', default=0.1, type=float)
     parser.add_argument('--device', default='cuda' , type=str, help='e.g. cuda:0')
-    parser.add_argument('--seed', default=85, type=int, help='set seed for reproducibility')
-    parser.add_argument('--valset_ratio', default=0.1, type=float, help='set ratio between 0 and 1 for validation support')
+    parser.add_argument('--seed', default=42, type=int, help='set seed for reproducibility')
     opt = parser.parse_args()
 
+    opt.seed= random.randint(0,300)
 
     if opt.seed is not None:
 
@@ -390,36 +391,14 @@ def main():
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False
 
-
-
-    dataset_files = {
+    opt.dataset_file = {
         'train': '{}/datasets/{}/train.json'.format(opt.workspace, opt.dataset),
-        'unlabel': '{}/datasets/large_corpus/unlabeled_corpus.txt'.format(opt.workspace,opt.dataset),
+        'unlabel': '{}/datasets/large_corpus/unlabeled_corpus.json'.format(opt.workspace,opt.dataset),
         'test': '{}/datasets/{}/dev.json'.format(opt.workspace,opt.dataset),
         'dev': '{}/datasets/{}/dev.json'.format(opt.workspace,opt.dataset),
     }
 
-
-    input_colses =  ['input_ids', 'segments_ids', 'input_mask', 'label']
-    initializers = {
-        'xavier_uniform_': torch.nn.init.xavier_uniform_,
-        'xavier_normal_': torch.nn.init.xavier_normal,
-        'orthogonal_': torch.nn.init.orthogonal_,
-    }
-    optimizers = {
-        'adadelta': torch.optim.Adadelta,  # default lr=1.0
-        'adagrad': torch.optim.Adagrad,  # default lr=0.01
-        'adam': torch.optim.AdamW,  # default lr=0.001
-        'adamax': torch.optim.Adamax,  # default lr=0.002
-        'asgd': torch.optim.ASGD,  # default lr=0.01
-        'rmsprop': torch.optim.RMSprop,  # default lr=0.01
-        'sgd': torch.optim.SGD,
-    }
-
-    opt.dataset_file = dataset_files
-    opt.inputs_cols = input_colses
-    opt.initializer = initializers[opt.initializer]
-    opt.optimizer = optimizers[opt.optimizer]
+    opt.inputs_cols = ['input_ids', 'segments_ids', 'input_mask', 'label']
     opt.device = torch.device(opt.device if torch.cuda.is_available() else 'cpu') \
         if opt.device is None else torch.device(opt.device)
 
