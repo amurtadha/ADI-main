@@ -260,7 +260,7 @@ class Instructor:
         model.to(self.opt.device)
 
         test_loss, test_f1_sc, test_f1_micro, test_acc, test_precisions, test_recalls, test_f1s, test_preds, \
-            misclass, conf_matrix, reps = self._evaluate_full(model, criterion_y, test_data_loader, getreps=True)
+            misclass, conf_matrix, reps = self._evaluate_full(model, criterion, test_data_loader, getreps=True)
 
         logger.info(
             '\t test ...loss: %5f, acc: %5f,f1 macro: %5f , f1 micro: %5f' % (
