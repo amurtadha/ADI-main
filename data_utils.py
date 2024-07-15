@@ -1,52 +1,76 @@
+import logging
+
+from torch.utils.data import Dataset
+import  json
+from tqdm import tqdm
+import numpy as np
+class Process_Corpus(Dataset):
+    def __init__(self, fname, tokenizer, max_seq_len, labels):
+        self.tokenizer=tokenizer
+        self.max_seq_len=max_seq_len
+        data_file = json.load(open(fname))
+
+        all_data=[]
+        for d in tqdm(data_file):
+            text, label = d['text'], d['label']
+            if label not in labels:continue
+
+            example = tokenizer.encode_plus(text, None, add_special_tokens=True, truncation=True,
+                                            padding='max_length', max_length=self.max_seq_len,
+                                            return_token_type_ids=True)
+            data = {
+                'input_ids': np.asarray(example['input_ids'], dtype='int64'),
+                'segments_ids': np.asarray(example['token_type_ids'], dtype='int64'),
+                'input_mask': np.asarray(example['attention_mask'], dtype='int64'),
+                'label':  labels[label],
+            }
+
+            all_data.append(data)
+        self.data = all_data
 
 
-import torch.nn as nn
-from transformers import  AutoModel, AutoConfig
+    def __getitem__(self, index):
+
+        return self.data[index]
+
+    def __len__(self):
+        return len(self.data)
+class Process_Corpus_ads(Dataset):
+    def __init__(self, fname, tokenizer, max_seq_len, labels, train_len):
+        # MyModel_ads.resize_token_embeddings(len(tokenizer))
+        self.tokenizer=tokenizer
+        self.max_seq_len=max_seq_len
+        data_file = json.load(open(fname))
+        indexes = np.random.choice(np.arange(1000000), train_len)
+        all_data=[]
+        logging.info('the number of unlabeled data : {}'.format(len(indexes)))
+        label = labels[ next(iter(labels))]
+
+        for i in tqdm(indexes):
+            d= data_file[i]
+        # for i, d in enumerate(tqdm(data_file,total= len(indexes)) ):
+        #     if i not in indexes:continue
+            text = d['text']
+
+            example = tokenizer.encode_plus(text, None, add_special_tokens=True, truncation=True,
+                                            padding='max_length', max_length=self.max_seq_len,
+                                            return_token_type_ids=True)
+            data = {
+                'input_ids': np.asarray(example['input_ids'], dtype='int64'),
+                'segments_ids': np.asarray(example['token_type_ids'], dtype='int64'),
+                'input_mask': np.asarray(example['attention_mask'], dtype='int64'),
+                'label': label,
+            }
 
 
-from torch.autograd import Function
-def mask_logits(target, mask):
-    return target * mask + (1 - mask) * (-1e30)
 
-class ADI_Classifier(nn.Module):
-    def __init__(self, args, hidden_size=256):
-        super(ADI_Classifier, self).__init__()
-        config = AutoConfig.from_pretrained(args.pretrained_bert_name)
-        self.encoder = AutoModel.from_pretrained(args.pretrained_bert_name, config=config)
-        self.encoder.to('cuda')
-
-        layers = [nn.Linear(config.hidden_size, args.lebel_dim)]
-        layers_rev = [nn.Linear(config.hidden_size, 2)]
-        self.dropout = nn.Dropout(config.hidden_dropout_prob)
-
-        self.classifier = nn.Sequential(*layers)
-        self.discriminator = nn.Sequential(*layers_rev)
-
-    def forward(self, inputs, alpha):
-
-        input_ids,token_type_ids, attention_mask = inputs[:3]
-        outputs = self.encoder(input_ids, token_type_ids=token_type_ids, attention_mask=attention_mask)
-        # pooled_output = outputs['last_hidden_state'][:, 0, :]
-        pooled_output = outputs[-1]
-        pooled_output = self.dropout(pooled_output)
-
-        reverse_feature =ReverseLayerF.apply(pooled_output, alpha)
-        logits = self.classifier(pooled_output)
-        logits_revers = self.discriminator(reverse_feature)
-        return pooled_output, logits, logits_revers
+            all_data.append(data)
+        self.data = all_data
 
 
-class ReverseLayerF(Function):
+    def __getitem__(self, index):
 
-    @staticmethod
-    def forward(ctx, x, alpha):
-        ctx.alpha = alpha
+        return self.data[index]
 
-        return x.view_as(x)
-
-    @staticmethod
-    def backward(ctx, grad_output):
-        output = grad_output.neg() * ctx.alpha
-        return output, None
-
-
+    def __len__(self):
+        return len(self.data)
