@@ -98,7 +98,7 @@ class Instructor:
 
             return test_loss, f1_sc, f1_micro, test_acc, precisions, recalls, f1s
 
-    def _full(self, model, criterion, val_data_loader, getreps=False):
+    def _evaluate_full(self, model, criterion, val_data_loader, getreps=False):
         with torch.no_grad():
             pred_list, true_all = [], []
             all_reps = []
@@ -121,8 +121,6 @@ class Instructor:
                 pred_list.extend(pred.detach().cpu().tolist())
                 true_all.extend(labels.data.detach().cpu().tolist())
 
-                if getreps:
-                    all_reps.append(reps)
 
             test_loss /= len(val_data_loader.dataset)
             test_acc /= len(val_data_loader.dataset)
@@ -192,7 +190,7 @@ class Instructor:
             model.eval()
             with torch.no_grad():
                 logger.info('validating')
-                val_loss, val_f1_sc,val_f1_micro, val_acc, val_precisions, val_recalls, val_f1s = self.(model, criterion, val_data_loader)
+                val_loss, val_f1_sc,val_f1_micro, val_acc, val_precisions, val_recalls, val_f1s = self._evaluate(model, criterion, val_data_loader)
 
                 best_valid_acc = max(val_acc, best_valid_acc)
 
@@ -201,6 +199,10 @@ class Instructor:
                 if val_acc > best_f1_test:
                     path = copy.deepcopy(model.state_dict())
                 best_f1_test = max(best_f1_test, val_acc)
+
+
+
+
         return path
 
 
@@ -216,6 +218,7 @@ class Instructor:
 
             label_to_indices[d['label']].append(idx)
 
+        # Sample from each group
         sampled_indices = []
         for label, indices in label_to_indices.items():
             sample_size = int(len(indices) * train_sample_ratio)
@@ -238,7 +241,20 @@ class Instructor:
         if self.opt.train_sample >0:
             trainset=self.balanced_train_sample(trainset, self.opt.train_sample)
 
+        #
+        # for i in range(len(trainset)):
+        #     trainset[i]['is_evidence'] =1
+        #
+        # for i in range(len(trainset_unlabel)):
+        #     trainset_unlabel[i]['is_evidence'] = 0
+        #     trainset_unlabel[i]['new_index'] = i
+        # for i in range(len(trainset)):
+        #     trainset[i]['new_index'] = len(trainset_unlabel)+i
+
+
         logger.info('train sample ratio {}, training {}, test {}, dev {}'.format(self.opt.train_sample, len(trainset), len(testset), len(valset)))
+
+
         train_data_loader = DataLoader(dataset=trainset, batch_size=self.opt.batch_size, shuffle=True)
         test_data_loader = DataLoader(dataset=testset, batch_size=self.opt.batch_size_val, shuffle=False)
         val_data_loader = DataLoader(dataset=valset, batch_size=self.opt.batch_size_val, shuffle=False)
