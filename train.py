@@ -20,7 +20,7 @@ from transformers import  AdamW
 
 import json
 from transformers import  AutoTokenizer
-from MyModel import ADI_Classifier
+from MyModel import DID
 import pickle as pk
 from torch.utils.tensorboard import SummaryWriter
 import copy
@@ -333,7 +333,7 @@ class Instructor:
         t_total = int(len(train_data_loader) * self.opt.num_epoch)
 
 
-        model = ADI_Classifier(self.opt)
+        model = DID(self.opt)
         #model = nn.DataParallel(model)
         model.to(self.opt.device)
 
