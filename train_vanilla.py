@@ -98,7 +98,7 @@ class Instructor:
 
             return test_loss, f1_sc, f1_micro, test_acc, precisions, recalls, f1s
 
-    def _evaluate_full(self, model, criterion, val_data_loader, getreps=False):
+    def _evaluate_full(self, model, criterion, val_data_loader):
         with torch.no_grad():
             pred_list, true_all = [], []
             all_reps = []
@@ -133,11 +133,8 @@ class Instructor:
             misclassifications = np.where(np.array(true_all) != np.array(pred_list))[0]
             conf_matrix = metrics.confusion_matrix(true_all, pred_list)
 
-            if getreps:
-                all_reps = torch.cat(all_reps).detach().cpu().numpy()
-
             return test_loss, f1_sc, f1_micro, test_acc, precisions, recalls, f1s, np.array(pred_list), \
-                misclassifications, conf_matrix, all_reps
+                misclassifications, conf_matrix
 
 
     def _train(self,model,optimizer,criterion,train_data_loader, val_data_loader, test_data_loader, t_total, lamd=0.8):
@@ -276,7 +273,7 @@ class Instructor:
         model.to(self.opt.device)
 
         test_loss, test_f1_sc, test_f1_micro, test_acc, test_precisions, test_recalls, test_f1s, test_preds, \
-            misclass, conf_matrix, reps = self._evaluate_full(model, criterion, test_data_loader, getreps=True)
+            misclass, conf_matrix = self._evaluate_full(model, criterion, test_data_loader)
 
         logger.info(
             '\t test ...loss: %5f, acc: %5f,f1 macro: %5f , f1 micro: %5f' % (
