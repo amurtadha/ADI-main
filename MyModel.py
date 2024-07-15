@@ -1,35 +1,23 @@
 
-# import numpy as np
-# import torch
-import torch.nn as nn
-# from transformers import  RobertaModel, RobertaConfig
-from transformers import  AutoModel, AutoConfig
-# from transformers.models.roberta.modeling_roberta import  shift
-# from transformers.models.bart.modeling_bart import  shift_tokens_right
 
-# import torch.nn.functional as F
+import torch.nn as nn
+from transformers import  AutoModel, AutoConfig
+
 
 from torch.autograd import Function
 def mask_logits(target, mask):
     return target * mask + (1 - mask) * (-1e30)
 
-class Pure_Roberta(nn.Module):
-    '''
-    Bert for sequence classification.
-    '''
-
+class DID(nn.Module):
     def __init__(self, args, hidden_size=256):
-        super(Pure_Roberta, self).__init__()
+        super(DID, self).__init__()
         config = AutoConfig.from_pretrained(args.pretrained_bert_name)
         self.encoder = AutoModel.from_pretrained(args.pretrained_bert_name, config=config)
         self.encoder.to('cuda')
 
-        #layers = [nn.Linear(config.hidden_size, hidden_size), nn.ReLU(), nn.Dropout(.3),
-
-        #          nn.Linear(hidden_size, args.lebel_dim)]
-
         layers = [nn.Linear(config.hidden_size, args.lebel_dim)]
         layers_rev = [nn.Linear(config.hidden_size, 2)]
+        self.dropout = nn.Dropout(config.hidden_dropout_prob)
 
         self.classifier = nn.Sequential(*layers)
         self.discriminator = nn.Sequential(*layers_rev)
@@ -38,12 +26,34 @@ class Pure_Roberta(nn.Module):
 
         input_ids,token_type_ids, attention_mask = inputs[:3]
         outputs = self.encoder(input_ids, token_type_ids=token_type_ids, attention_mask=attention_mask)
-        pooled_output = outputs['last_hidden_state'][:, 0, :]
+        # pooled_output = outputs['last_hidden_state'][:, 0, :]
+        pooled_output = outputs[-1]
+        pooled_output = self.dropout(pooled_output)
+
         reverse_feature =ReverseLayerF.apply(pooled_output, alpha)
         logits = self.classifier(pooled_output)
         logits_revers = self.discriminator(reverse_feature)
         return pooled_output, logits, logits_revers
+class Vanilla(nn.Module):
+    def __init__(self, args, hidden_size=256):
+        super(Vanilla, self).__init__()
+        config = AutoConfig.from_pretrained(args.pretrained_bert_name)
+        self.encoder = AutoModel.from_pretrained(args.pretrained_bert_name, config=config)
+        self.encoder.to('cuda')
 
+        layers = [nn.Linear(config.hidden_size, args.lebel_dim)]
+        self.dropout = nn.Dropout(config.hidden_dropout_prob)
+
+        self.classifier = nn.Sequential(*layers)
+
+    def forward(self, inputs):
+
+        input_ids,token_type_ids, attention_mask = inputs[:3]
+        outputs = self.encoder(input_ids, token_type_ids=token_type_ids, attention_mask=attention_mask)
+        # pooled_output = outputs['last_hidden_state'][:, 0, :]
+        pooled_output = outputs[-1]
+        pooled_output = self.dropout(pooled_output)
+        return  self.classifier(pooled_output)
 
 class ReverseLayerF(Function):
 
