@@ -48,8 +48,6 @@ class Process_Corpus_ads(Dataset):
 
         for i in tqdm(indexes):
             d= data_file[i]
-        # for i, d in enumerate(tqdm(data_file,total= len(indexes)) ):
-        #     if i not in indexes:continue
             text = d['text']
 
             example = tokenizer.encode_plus(text, None, add_special_tokens=True, truncation=True,
