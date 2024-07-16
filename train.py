@@ -36,7 +36,7 @@ logger.addHandler(logging.StreamHandler(sys.stdout))
 class Instructor:
     def __init__(self, opt):
         self.opt = opt
-        print('here')
+        logger.info(' Task:{}, PLM:{}, N sample:{}'.format(opt.dataset, opt.pretrained_bert_name.split('/')[-1], opt.train_sample))
         opt.plm = opt.pretrained_bert_name.split('/')[-1]
         cache = 'cache/AADI_{}_{}.pk'.format(opt.dataset, opt.plm)
         self.labels  = json.load(open('{}/datasets/{}/labels.json'.format(opt.workspace,opt.dataset)))
@@ -232,42 +232,6 @@ class Instructor:
                     path = copy.deepcopy(model.state_dict())
                 best_f1_test = max(best_f1_test, val_acc)
 
-
-            # is_best = val_acc >= best_valid_acc
-            # if is_best:
-            #     model.eval()
-            #
-            #     with torch.no_grad():
-            #         logger.info('testing')
-            #         # test_loss, f1_sc, f1_micro, test_acc
-            #
-            #         test_loss, test_f1_sc, test_f1_micro, test_acc, test_precisions, test_recalls, \
-            #             test_f1s = self._evaluate(model, criterion_y,  test_data_loader, getreps=False)
-            #
-            #         if test_f1_sc > best_f1_test:
-            #             # path = f"models/aadi_{self.opt.pretrained_bert_name.split('/')[-1]}_{self.opt.dataset}_{datetime.now().strftime('%Y-%m-%d')}"
-            #             path = copy.deepcopy(model.state_dict())
-            #
-            #         best_acc_test = max(best_acc_test, test_acc)
-            #         best_f1_test = max(best_f1_test, test_f1_sc)
-            #         best_f1_micro_test = max(best_f1_micro_test, test_f1_micro)
-            #
-            #
-            #         logger.info(
-            #             '\t test ...loss: %5f, acc: %5f,f1 macro: %5f , f1 micro: %5f best_acc: %5f best_f1: %5f best_f1 micro: %5f ' % (
-            #                 test_loss, test_acc, test_f1_sc, test_f1_micro, best_acc_test, best_f1_test,
-            #                 best_f1_micro_test))
-            #
-            #         writer = SummaryWriter('runs/AADI/Corpus_6_camelbert-mix_5')
-            #         writer.add_scalar('Testing Accuracy', best_f1_micro_test, global_step)
-            #         writer.add_scalar('Testing loss', test_loss, global_step)
-            #         writer.add_scalar('Validation Accuracy', best_valid_acc, global_step)
-            #         writer.add_scalar('Validation', val_loss, global_step)
-
-        # with open('results_ads.txt', 'a+') as f :
-        #     f.write(f"{datetime.now().strftime('%Y-%m-%d %H:%M')} model {self.opt.pretrained_bert_name.split('/')[-1]} dataset {self.opt.dataset} train_sample {self.opt.train_sample} f1  {best_f1_test:.4} acc {best_acc_test:.4} \n")
-        # f.close()
-
         return path
 
 
@@ -286,8 +250,8 @@ class Instructor:
         # Sample from each group
         sampled_indices = []
         for label, indices in label_to_indices.items():
-            sample_size = int(len(indices) * train_sample_ratio)
-            sampled_indices.extend(random.sample(indices, sample_size))
+            # sample_size = int(len(indices) * train_sample_ratio)
+            sampled_indices.extend(random.sample(indices, train_sample_ratio))
 
         # Create a subset of the trainset with the sampled indices
         trainset = Subset(trainset, sampled_indices)
@@ -306,11 +270,9 @@ class Instructor:
 
         if self.opt.train_sample >0:
             trainset=self.balanced_train_sample(trainset, self.opt.train_sample)
-
-            # ratio = int(len(trainset) * self.opt.train_sample)
-            # _, trainset = random_split(trainset, (len(trainset) - ratio, ratio))
-
-            ratio = int(len(trainset_unlabel) * self.opt.train_sample)
+            print(len(trainset))
+            trainset = ConcatDataset([trainset] * 5)
+            ratio =len(trainset)
             _, trainset_unlabel = random_split(trainset_unlabel, (len(trainset_unlabel) - ratio, ratio))
 
         for i in range(len(trainset)):
@@ -368,14 +330,14 @@ def main():
     parser.add_argument('--dataset', default='Corpus-26', type=str, help=' Corpus-26, Corpus-6')
     parser.add_argument('--workspace', default='/workspace/ArNLP/', type=str, help=' workspace')
     parser.add_argument('--learning_rate', default=3e-5, type=float,)
-    parser.add_argument('--num_epoch', default=6, type=int)
+    parser.add_argument('--num_epoch', default=10, type=int)
     parser.add_argument('--batch_size', default=64, type=int)
     parser.add_argument('--batch_size_val', default=64, type=int)
     parser.add_argument('--warmup_proportion', default=0.01, type=float)
     parser.add_argument('--pretrained_bert_name', default='rahbi/alclam-base-v1',type=str)
     parser.add_argument('--max_seq_len', default=128, type=int)
     parser.add_argument('--lebel_dim', default=26, type=int)
-    parser.add_argument('--train_sample', default=0.1, type=float)
+    parser.add_argument('--train_sample', default=5, type=int)
     parser.add_argument('--device', default='cuda' , type=str, help='e.g. cuda:0')
     parser.add_argument('--seed', default=42, type=int, help='set seed for reproducibility')
     opt = parser.parse_args()
