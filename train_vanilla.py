@@ -36,7 +36,7 @@ logger.addHandler(logging.StreamHandler(sys.stdout))
 class Instructor:
     def __init__(self, opt):
         self.opt = opt
-        print('here')
+        logger.info(' Task:{}, PLM:{}, N sample:{}'.format(opt.dataset, opt.pretrained_bert_name.split('/')[-1], opt.train_sample))
         opt.plm = opt.pretrained_bert_name.split('/')[-1]
         self.labels  = json.load(open('{}/datasets/{}/labels.json'.format(opt.workspace,opt.dataset)))
 
@@ -126,15 +126,14 @@ class Instructor:
             test_acc /= len(val_data_loader.dataset)
             f1_sc = metrics.f1_score(true_all, pred_list, average='macro')
             f1_micro = metrics.f1_score(true_all, pred_list, average='micro')
-           # confusion = metrics.confusion_matrix(true_all, pred_list)
+            # confusion = metrics.confusion_matrix(true_all, pred_list)
             precisions = metrics.precision_score(true_all, pred_list, average=None)
             recalls = metrics.recall_score(true_all, pred_list, average=None)
             f1s = metrics.f1_score(true_all, pred_list, average=None)
-            misclassifications = np.where(np.array(true_all) != np.array(pred_list))[0]
-            conf_matrix = metrics.confusion_matrix(true_all, pred_list)
-
-            return test_loss, f1_sc, f1_micro, test_acc, precisions, recalls, f1s, np.array(pred_list), \
-                misclassifications, conf_matrix
+           #  misclassifications = np.where(np.array(true_all) != np.array(pred_list))[0]
+           #  conf_matrix = metrics.confusion_matrix(true_all, pred_list)
+           #
+            return test_loss, f1_sc, f1_micro, test_acc, precisions, recalls, f1s, np.array(pred_list)
 
 
     def _train(self,model,optimizer,criterion,train_data_loader, val_data_loader, test_data_loader, t_total, lamd=0.8):
@@ -204,7 +203,7 @@ class Instructor:
 
 
 
-    def balanced_train_sample(sefl, trainset, train_sample_ratio, seed=None):
+    def balanced_train_sample(sefl, trainset, sample_size, seed=None):
         if seed is not None:
             random.seed(seed)
             torch.manual_seed(seed)
@@ -218,7 +217,6 @@ class Instructor:
         # Sample from each group
         sampled_indices = []
         for label, indices in label_to_indices.items():
-            sample_size = int(len(indices) * train_sample_ratio)
             sampled_indices.extend(random.sample(indices, sample_size))
 
         # Create a subset of the trainset with the sampled indices
@@ -238,15 +236,7 @@ class Instructor:
         if self.opt.train_sample >0:
             trainset=self.balanced_train_sample(trainset, self.opt.train_sample)
 
-        #
-        # for i in range(len(trainset)):
-        #     trainset[i]['is_evidence'] =1
-        #
-        # for i in range(len(trainset_unlabel)):
-        #     trainset_unlabel[i]['is_evidence'] = 0
-        #     trainset_unlabel[i]['new_index'] = i
-        # for i in range(len(trainset)):
-        #     trainset[i]['new_index'] = len(trainset_unlabel)+i
+
 
 
         logger.info('train sample ratio {}, training {}, test {}, dev {}'.format(self.opt.train_sample, len(trainset), len(testset), len(valset)))
@@ -272,14 +262,13 @@ class Instructor:
 
         model.to(self.opt.device)
 
-        test_loss, test_f1_sc, test_f1_micro, test_acc, test_precisions, test_recalls, test_f1s, test_preds, \
-            misclass, conf_matrix = self._evaluate_full(model, criterion, test_data_loader)
+        test_loss, test_f1_sc, test_f1_micro, test_acc, test_precisions, test_recalls, test_f1s, test_preds= self._evaluate_full(model, criterion, test_data_loader)
 
         logger.info(
             '\t test ...loss: %5f, acc: %5f,f1 macro: %5f , f1 micro: %5f' % (
                 test_loss, test_acc, test_f1_sc, test_f1_micro))
 
-        with open('results_vanila.txt', 'a+') as f:
+        with open('results_vanila_shots.txt', 'a+') as f:
             f.write(
                 f"{datetime.now().strftime('%Y-%m-%d %H:%M')} model {self.opt.pretrained_bert_name.split('/')[-1]} dataset {self.opt.dataset} train_sample {self.opt.train_sample} f1  {test_f1_sc:.4} acc {test_acc:.4} \n")
         f.close()
@@ -299,7 +288,7 @@ def main():
     parser.add_argument('--pretrained_bert_name', default='rahbi/alclam-base-v1',type=str)
     parser.add_argument('--max_seq_len', default=128, type=int)
     parser.add_argument('--lebel_dim', default=26, type=int)
-    parser.add_argument('--train_sample', default=0.1, type=float)
+    parser.add_argument('--train_sample', default=5, type=int)
     parser.add_argument('--device', default='cuda' , type=str, help='e.g. cuda:0')
     parser.add_argument('--seed', default=42, type=int, help='set seed for reproducibility')
     opt = parser.parse_args()
