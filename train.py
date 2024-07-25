@@ -44,9 +44,11 @@ class Instructor:
         tokenizer = AutoTokenizer.from_pretrained(opt.pretrained_bert_name)
 
         self.opt.lebel_dim = len(self.labels)
+        ratio = self.opt.lebel_dim * opt.train_sample* opt.augment_ratio
+        # ratio = 1000
         self.trainset = Process_Corpus(opt.dataset_file['train'], tokenizer, opt.max_seq_len, self.labels)
         self.trainset_unlabel = Process_Corpus_ads(opt.dataset_file['unlabel'], tokenizer, opt.max_seq_len, self.labels,
-                                                   train_len=len(self.trainset))
+                                                   train_len=ratio)
         self.valset = Process_Corpus(opt.dataset_file['dev'], tokenizer, opt.max_seq_len, self.labels)
         self.testset = Process_Corpus(opt.dataset_file['test'], tokenizer, opt.max_seq_len, self.labels)
 
@@ -79,7 +81,8 @@ class Instructor:
                 labels = labels.to(self.opt.device)
 
                 inputs = [v_sample_batched[col].to(self.opt.device) for col in self.opt.inputs_cols]
-                reps, logits, _ = model(inputs, alpha=0)
+                # reps, logits, _ = model(inputs, alpha=0, labels=labels)
+                logits= model(inputs,labels=labels)
 
                 loss = criterion(logits, labels)
                 test_loss += inputs[0].size(0) * loss.data
@@ -113,7 +116,8 @@ class Instructor:
                 labels = labels.to(self.opt.device)
 
                 inputs = [v_sample_batched[col].to(self.opt.device) for col in self.opt.inputs_cols]
-                reps, logits, _ = model(inputs, alpha=0)
+                # reps, logits, _ = model(inputs, alpha=0, labels=labels)
+                logits= model(inputs,labels=labels)
 
                 loss = criterion(logits, labels)
                 test_loss += inputs[0].size(0) * loss.data
@@ -124,8 +128,7 @@ class Instructor:
                 pred_list.extend(pred.detach().cpu().tolist())
                 true_all.extend(labels.data.detach().cpu().tolist())
 
-                if getreps:
-                    all_reps.append(reps)
+
 
             test_loss /= len(val_data_loader.dataset)
             test_acc /= len(val_data_loader.dataset)
@@ -138,14 +141,14 @@ class Instructor:
             misclassifications = np.where(np.array(true_all) != np.array(pred_list))[0]
             conf_matrix = metrics.confusion_matrix(true_all, pred_list)
 
-            if getreps:
-                all_reps = torch.cat(all_reps).detach().cpu().numpy()
+            # if getreps:
+            #     all_reps = torch.cat(all_reps).detach().cpu().numpy()
 
             return test_loss, f1_sc, f1_micro, test_acc, precisions, recalls, f1s, np.array(pred_list), \
-                misclassifications, conf_matrix, all_reps
+                misclassifications, conf_matrix
 
 
-    def _train(self,model,optimizer,criterion_y,criterion_d,train_data_loader, val_data_loader, test_data_loader, t_total, lamd=0.8):
+    def _train(self,model,optimizer,criterion_y,criterion_d,train_data_loader,untrain_data_loader, val_data_loader, test_data_loader, t_total, lamd=0.7):
 
         best_acc_test=0
         global_step = 0
@@ -153,7 +156,8 @@ class Instructor:
         best_valid_acc = 0.0
         best_f1_test = 0.0
         len_dataloader= len(train_data_loader.dataset)
-
+        initial_alpha = 0.0
+        final_alpha = 1.0
         for epoch in range(self.opt.num_epoch):
             train_loss =train_rev= t_total_c = train_acc = 0.0
             model.train()
@@ -164,30 +168,36 @@ class Instructor:
                     param_group['lr'] = lr_this_step
                     self.opt.learning_rate = param_group['lr']
 
-            for i_batch, sample_batched in enumerate(tqdm(train_data_loader)):
+            # for i_batch, sample_batched in enumerate(tqdm(train_data_loader)):
+            for i_batch, (sample_batched ,unsample_batched) in enumerate(tqdm(zip(train_data_loader, untrain_data_loader), total=len(untrain_data_loader))):
 
                 model.zero_grad()
 
                 global_step += 1
                 optimizer.zero_grad()
                 labels = sample_batched['label'].to(self.opt.device)
-                evid = sample_batched['is_evidence'].to(self.opt.device)
-    
+                evid = (sample_batched['is_evidence']+unsample_batched['is_evidence']).to(self.opt.device)
+
 
 
                 p = float(global_step + epoch * len_dataloader) /self.opt.num_epoch  / len_dataloader
                 alpha = 2. / (1. + np.exp(-10 * p)) - 1
+                # alpha = initial_alpha + (final_alpha - initial_alpha) * i_batch / (self.opt.num_epoch - 1)
 
                 #
-                label_clean = labels[evid == 1]
-                label_clean = label_clean
+                # label_clean = labels[evid == 1]
+                # label_clean = label_clean
 
 
                 inputs = [sample_batched[col].to(self.opt.device) for col in self.opt.inputs_cols]
-                _,logits,logits_rev = model(inputs, alpha)
+                uninputs = [unsample_batched[col].to(self.opt.device) for col in self.opt.inputs_cols]
+                logits_rev = model(inputs+uninputs,evid, reverse=True, alpha=alpha)
+                logits = model(inputs,labels,alpha=alpha)
+                # logits = model(inputs,labels,alpha=1.0)
 
                 loss_d = criterion_d(logits_rev, evid)
-                loss_y = criterion_y(logits[evid==1], label_clean)
+                # loss_y = criterion_y(logits[evid==1], label_clean)
+                loss_y = criterion_y(logits, labels)
 
                 # loss = loss_d+loss_y
                 loss = (1 - lamd) * loss_d + lamd * loss_y
@@ -195,12 +205,18 @@ class Instructor:
                 with torch.no_grad():
 
                     train_rev += evid.size(0) * loss_d.data
-                    if logits[evid==1].size(0):
-                        train_loss += logits[evid == 1].size(0) * loss_y.data
-                        _, pred = torch.max(logits[evid==1].data, -1)
-                        acc = float((pred == label_clean.data).sum())
+                    # if logits[evid==1].size(0):
+                    #     train_loss += logits[evid == 1].size(0) * loss_y.data
+                    #     _, pred = torch.max(logits[evid==1].data, -1)
+                    if logits.size(0):
+                        train_loss += logits.size(0) * loss_y.data
+                        _, pred = torch.max(logits.data, -1)
+
+                        # acc = float((pred == label_clean.data).sum())
+                        acc = float((pred == labels.data).sum())
                         train_acc += acc
-                        t_total_c+=label_clean.size(0)
+                        t_total_c+=labels.size(0)
+                        # t_total_c+=label_clean.size(0)
 
 
                 loss.backward()
@@ -228,9 +244,45 @@ class Instructor:
 
                 logger.info('\t valid ...loss: %5f, acc: %5f,f1: %5f,f1 micro: %5f, best_acc: %5f' % (
                     val_loss, val_acc, val_f1_sc,val_f1_micro,best_valid_acc))
-                if val_acc > best_f1_test:
+                if val_f1_sc > best_f1_test:
                     path = copy.deepcopy(model.state_dict())
                 best_f1_test = max(best_f1_test, val_acc)
+
+
+            # is_best = val_acc >= best_valid_acc
+            # if is_best:
+            #     model.eval()
+            #
+            #     with torch.no_grad():
+            #         logger.info('testing')
+            #         # test_loss, f1_sc, f1_micro, test_acc
+            #
+            #         test_loss, test_f1_sc, test_f1_micro, test_acc, test_precisions, test_recalls, \
+            #             test_f1s = self._evaluate(model, criterion_y,  test_data_loader, getreps=False)
+            #
+            #         if test_f1_sc > best_f1_test:
+            #             # path = f"models/aadi_{self.opt.pretrained_bert_name.split('/')[-1]}_{self.opt.dataset}_{datetime.now().strftime('%Y-%m-%d')}"
+            #             path = copy.deepcopy(model.state_dict())
+            #
+            #         best_acc_test = max(best_acc_test, test_acc)
+            #         best_f1_test = max(best_f1_test, test_f1_sc)
+            #         best_f1_micro_test = max(best_f1_micro_test, test_f1_micro)
+            #
+            #
+            #         logger.info(
+            #             '\t test ...loss: %5f, acc: %5f,f1 macro: %5f , f1 micro: %5f best_acc: %5f best_f1: %5f best_f1 micro: %5f ' % (
+            #                 test_loss, test_acc, test_f1_sc, test_f1_micro, best_acc_test, best_f1_test,
+            #                 best_f1_micro_test))
+            #
+            #         writer = SummaryWriter('runs/AADI/Corpus_6_camelbert-mix_5')
+            #         writer.add_scalar('Testing Accuracy', best_f1_micro_test, global_step)
+            #         writer.add_scalar('Testing loss', test_loss, global_step)
+            #         writer.add_scalar('Validation Accuracy', best_valid_acc, global_step)
+            #         writer.add_scalar('Validation', val_loss, global_step)
+
+        # with open('results_ads.txt', 'a+') as f :
+        #     f.write(f"{datetime.now().strftime('%Y-%m-%d %H:%M')} model {self.opt.pretrained_bert_name.split('/')[-1]} dataset {self.opt.dataset} train_sample {self.opt.train_sample} f1  {best_f1_test:.4} acc {best_acc_test:.4} \n")
+        # f.close()
 
         return path
 
@@ -270,10 +322,8 @@ class Instructor:
 
         if self.opt.train_sample >0:
             trainset=self.balanced_train_sample(trainset, self.opt.train_sample)
-            print(len(trainset))
-            trainset = ConcatDataset([trainset] * 5)
-            ratio =len(trainset)
-            _, trainset_unlabel = random_split(trainset_unlabel, (len(trainset_unlabel) - ratio, ratio))
+            trainset = ConcatDataset([trainset] * self.opt.augment_ratio)
+
 
         for i in range(len(trainset)):
             trainset[i]['is_evidence'] =1
@@ -285,11 +335,12 @@ class Instructor:
             trainset[i]['new_index'] = len(trainset_unlabel)+i
 
 
-        trainset= ConcatDataset([trainset, trainset_unlabel])
+        # trainset= ConcatDataset([trainset, trainset_unlabel])
         logger.info('train sample ratio {}, training {}, unlabel {}, test {}, dev {}'.format(self.opt.train_sample, len(trainset), len(trainset_unlabel), len(testset), len(valset)))
 
 
         train_data_loader = DataLoader(dataset=trainset, batch_size=self.opt.batch_size, shuffle=True)
+        untrain_data_loader = DataLoader(dataset=trainset_unlabel, batch_size=self.opt.batch_size, shuffle=True)
         test_data_loader = DataLoader(dataset=testset, batch_size=self.opt.batch_size_val, shuffle=False)
         val_data_loader = DataLoader(dataset=valset, batch_size=self.opt.batch_size_val, shuffle=False)
         t_total = int(len(train_data_loader) * self.opt.num_epoch)
@@ -305,19 +356,19 @@ class Instructor:
         criterion_y = nn.CrossEntropyLoss()
         criterion_d = nn.CrossEntropyLoss()
 
-        best_model_path = self._train(model,optimizer,criterion_y, criterion_d,  train_data_loader, val_data_loader, test_data_loader, t_total)
+        best_model_path = self._train(model,optimizer,criterion_y, criterion_d,  train_data_loader,untrain_data_loader, val_data_loader, test_data_loader, t_total)
         model.load_state_dict(best_model_path)
 
         model.to(self.opt.device)
 
         test_loss, test_f1_sc, test_f1_micro, test_acc, test_precisions, test_recalls, test_f1s, test_preds, \
-            misclass, conf_matrix, reps = self._evaluate_full(model, criterion_y, test_data_loader, getreps=True)
+            misclass, conf_matrix = self._evaluate_full(model, criterion_y, test_data_loader, getreps=False)
 
         logger.info(
             '\t test ...loss: %5f, acc: %5f,f1 macro: %5f , f1 micro: %5f' % (
                 test_loss, test_acc, test_f1_sc, test_f1_micro))
 
-        with open('results_ads.txt', 'a+') as f:
+        with open('results_ads_n_shots_24.txt', 'a+') as f:
             f.write(
                 f"{datetime.now().strftime('%Y-%m-%d %H:%M')} model {self.opt.pretrained_bert_name.split('/')[-1]} dataset {self.opt.dataset} train_sample {self.opt.train_sample} f1  {test_f1_sc:.4} acc {test_acc:.4} \n")
         f.close()
@@ -330,9 +381,10 @@ def main():
     parser.add_argument('--dataset', default='Corpus-26', type=str, help=' Corpus-26, Corpus-6')
     parser.add_argument('--workspace', default='/workspace/ArNLP/', type=str, help=' workspace')
     parser.add_argument('--learning_rate', default=3e-5, type=float,)
-    parser.add_argument('--num_epoch', default=10, type=int)
-    parser.add_argument('--batch_size', default=64, type=int)
-    parser.add_argument('--batch_size_val', default=64, type=int)
+    parser.add_argument('--num_epoch', default=6, type=int)
+    parser.add_argument('--batch_size', default=8, type=int)
+    parser.add_argument('--augment_ratio', default=50, type=int)
+    parser.add_argument('--batch_size_val', default=8, type=int)
     parser.add_argument('--warmup_proportion', default=0.01, type=float)
     parser.add_argument('--pretrained_bert_name', default='rahbi/alclam-base-v1',type=str)
     parser.add_argument('--max_seq_len', default=128, type=int)
